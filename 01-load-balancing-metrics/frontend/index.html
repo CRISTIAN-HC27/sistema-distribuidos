@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Load Balancer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: sans-serif;
+            padding: 2rem;
+            background: #fff;
+            color: #222;
+        }
+
+        h1 {
+            margin-bottom: 0.25rem;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 1.5rem;
+        }
+
+        .health {
+            display: inline-block;
+            padding: 0.3rem 1rem;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-bottom: 1.5rem;
+        }
+
+        .health-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .health-bad {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        table {
+            border-collapse: collapse;
+            margin-bottom: 1.5rem;
+            width: 100%;
+            max-width: 500px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 0.6rem 1rem;
+            border: 1px solid #ddd;
+        }
+
+        th {
+            background: #f5f5f5;
+        }
+
+        .up {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .down {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .dist {
+            color: #555;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Dashboard del Load Balancer</h1>
+    <div class="subtitle">Balanceo de carga resiliente · Nginx + Redis · Polling 1s</div>
+
+    <div id="clusterHealth" class="health health-ok">Cluster: SALUDABLE</div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Nodo</th>
+                <th>Estado</th>
+                <th>Peticiones</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>5001</td>
+                <td id="status-5001" class="up">UP</td>
+                <td id="count-5001">0</td>
+            </tr>
+            <tr>
+                <td>5002</td>
+                <td id="status-5002" class="up">UP</td>
+                <td id="count-5002">0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="dist" id="distribution">Distribución: 5001: 50% | 5002: 50%</div>
+    <div class="dist" id="globalTotal">Total global: 0</div>
+
+    <script>
+        const NODES = [5001, 5002];
+
+        function updateNode(port, data) {
+            const statusEl = document.getElementById(`status-${port}`);
+            const countEl = document.getElementById(`count-${port}`);
+
+            if (data && data.estado === 'UP') {
+                statusEl.className = 'up';
+                statusEl.textContent = 'UP';
+                countEl.textContent = data.peticiones_nodo ?? 0;
+            } else {
+                statusEl.className = 'down';
+                statusEl.textContent = 'DOWN';
+                countEl.textContent = '-';
+            }
+        }
+
+        async function poll() {
+            let total5001 = 0, total5002 = 0, globalTotal = 0;
+            let bothUp = true;
+
+            const results = await Promise.allSettled(
+                NODES.map(port =>
+                    fetch(`http://localhost:${port}/status`)
+                        .then(r => r.json())
+                        .catch(() => null)
+                )
+            );
+
+            results.forEach((res, i) => {
+                const port = NODES[i];
+                const data = res.status === 'fulfilled' ? res.value : null;
+                updateNode(port, data);
+                if (data && data.estado === 'UP') {
+                    if (port === 5001) total5001 = data.peticiones_nodo;
+                    if (port === 5002) total5002 = data.peticiones_nodo;
+                    globalTotal = data.peticiones_totales;
+                } else {
+                    bothUp = false;
+                }
+            });
+
+            const sum = total5001 + total5002;
+            const pct1 = sum ? Math.round((total5001 / sum) * 100) : 50;
+            const pct2 = 100 - pct1;
+            document.getElementById('distribution').textContent =
+                `Distribución: 5001: ${pct1}% | 5002: ${pct2}%`;
+
+            const healthEl = document.getElementById('clusterHealth');
+            if (bothUp) {
+                healthEl.className = 'health health-ok';
+                healthEl.textContent = 'Cluster: SALUDABLE';
+            } else {
+                healthEl.className = 'health health-bad';
+                healthEl.textContent = 'Cluster: DEGRADADO';
+            }
+
+            document.getElementById('globalTotal').textContent = `Total global: ${globalTotal}`;
+        }
+
+        fetch('http://localhost:8000/').catch(() => { });
+        poll();
+        setInterval(poll, 1000);
+    </script>
+</body>
+
+</html>
