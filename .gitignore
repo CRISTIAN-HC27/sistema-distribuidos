@@ -22,3 +22,6 @@ Thumbs.db
 # IDEs and editors
 .idea/
 .vscode/
+
+# Postgres volume
+**/data/pg/
